@@ -1,0 +1,32 @@
+[build-system]
+requires = [
+    "setuptools>=67",
+    "setuptools-scm>=7"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinyrdf"
+dynamic = ["version"]
+authors = [
+    {name = "Niklas Lindström", email = "lindstream@gmail.com"},
+]
+description = "A tiny RDF library."
+
+license = {text = "Zero-Clause BSD"}
+classifiers = [
+    "License :: OSI Approved :: Zero-Clause BSD (0BSD)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed"
+]
+readme = "README.md"
+
+[project.urls]
+repository = "https://github.com/niklasl/tinyrdf"
+
+[tool.setuptools]
+packages = ["tinyrdf"]
+
+[tool.setuptools_scm]
