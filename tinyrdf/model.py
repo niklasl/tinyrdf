@@ -1,48 +1,48 @@
 from __future__ import annotations
 
-from collections.abc import Set
+from collections.abc import Sequence, Set
 from typing import Iterable, Iterator, Mapping, NamedTuple, cast
 
-from .terms import (IRI, RDF_REIFIES, RDF_TYPE, BNode, DataLiteral, Dataset,
-                    Graph, Literal, Quad, Reference, Term, TextLiteral, Triple,
-                    TripleTerm)
-
-type NominalResource = NamedResource | IdentifiedResource
-type StructuredResource = Proposition | Value
+from .terms import (IRI, RDF_REIFIES, RDF_FIRST, RDF_NIL, RDF_REST, RDF_TYPE,
+                    BNode, Dataset, Graph, Literal, Quad, Reference, Term,
+                    Triple)
 
 
-class InterpretationSpace:
-    main: GraphInterpretation
-    named: Mapping[Reference, GraphInterpretation]
+class ModelSpace:
+    default: Model
+    named: Mapping[Reference, Model]
 
     _bnode_uniq: str
     _bnode_counter: int = 0
 
-    def __init__(self, main: GraphInterpretation | None = None):
-        self.main = main if main is not None else self._new_intrepretation()
+    def __init__(self, default: Model | None = None):
+        self.default = default if default is not None else self._new_model()
         self.named = {}
 
         self._bnode_uniq = hex(id(self))[2:]
         self._bnode_counter = 0
 
-    def _new_intrepretation(self) -> GraphInterpretation:
-        return GraphInterpretation(self)
+    def _new_model(self) -> Model:
+        return Model(self)
 
-    def new_bnode_id(self) -> str:
+    def _new_bnode_id(self) -> str:
         self._bnode_counter += 1
         return f"b-{self._bnode_uniq}-{self._bnode_counter}"
 
-    def interpret(self, datastream: Iterable[Triple | Quad]) -> int:
+    def new_blank(self, bnode_id: str | None = None) -> BNode:
+        return BNode(bnode_id or self._new_bnode_id())
+
+    def decode(self, datastream: Iterable[Triple | Quad]) -> int:
         i = 0
         for datum in datastream:
             if isinstance(datum, Triple):
                 s, p, o = datum
-                graph = self.main
+                graph = self.default
             else:
                 s, p, o, g = datum
                 if g not in self.named:
                     assert isinstance(self.named, dict)
-                    self.named[g] = self._new_intrepretation()
+                    self.named[g] = self._new_model()
                 graph = self.named[g]
 
             subj = graph.get(s)
@@ -53,8 +53,8 @@ class InterpretationSpace:
 
         return i
 
-    def represent(self) -> Iterator[Triple | Quad]:
-        for triple in self.main.get_triples():
+    def encode(self) -> Iterator[Triple | Quad]:
+        for triple in self.default.get_triples():
             yield triple
 
         for name, model in self.named.items():
@@ -62,20 +62,20 @@ class InterpretationSpace:
                 yield Quad(s, p, o, name)
 
     def __iter__(self) -> Iterator[Triple | Quad]:
-        return self.represent()
+        return self.encode()
 
 
-class GraphInterpretation:
-    space: InterpretationSpace
+class Model:
+    space: ModelSpace
 
     _resources: dict[Term, Resource]
 
-    def __init__(self, space: InterpretationSpace | None = None):
+    def __init__(self, space: ModelSpace | None = None):
         self.space = space or self._new_space()
         self._resources = {}
 
-    def _new_space(self) -> InterpretationSpace:
-        return InterpretationSpace(self)
+    def _new_space(self) -> ModelSpace:
+        return ModelSpace(self)
 
     def get(self, term: Term) -> Resource:
         resource = self._resources.get(term)
@@ -87,16 +87,18 @@ class GraphInterpretation:
 
     def _new_resource(self, term: Term) -> Resource:
         match term:
-            case TripleTerm(_):
-                return Proposition(self, cast(TripleTerm, term))
-            case DataLiteral(_):
-                return DataValue(self, term)
-            case TextLiteral(_):
-                return TextValue(self, term)
+            case Triple(_):
+                return Proposition(self, cast(Triple, term))
+            case Literal(_):
+                if term.language is not None:
+                    return TextValue(self, term)
+                else:
+                    data = None  # TODO: values.parse(term)
+                    return DataValue[object](self, term, data)
             case IRI(_):
-                return IdentifiedResource(self, cast(IRI, term))
+                return IdentifiedResource(self, term)
             case BNode(_):
-                return NamedResource(self, cast(Reference, term))
+                return BlankResource(self, term)
 
     def add(self, subj: Resource, pred: Reference, obj: Resource) -> bool:
         if pred not in subj._description:
@@ -138,12 +140,12 @@ class GraphInterpretation:
 
     def get_statements(self) -> Iterator[Statement]:
         for resource in self.get_resources():
-            if isinstance(resource, NamedResource):
+            if isinstance(resource, DescribedResource):
                 yield from resource.get_statements()
 
     def get_triples(self) -> Iterator[Triple]:
         for resource in self._resources.values():
-            if not isinstance(resource, NamedResource):
+            if not isinstance(resource, DescribedResource):
                 continue
             for pred, objs in resource._description.items():
                 if not isinstance(pred, IRI):
@@ -153,29 +155,21 @@ class GraphInterpretation:
 
 
 class Statement(NamedTuple):
-    subject: NamedResource
+    subject: DescribedResource
     predicate: IdentifiedResource
     object: Resource
 
-    def to_proposition(self) -> Proposition:
-        return Proposition(self.subject.model, cast(TripleTerm, self.to_triple()))
-
     def to_triple(self) -> Triple | None:
-        s = self.subject
+        return Triple(self.subject.ref, self.predicate.iri, self.object.term)
 
-        if not isinstance(s, NamedResource):
-            return None
-
-        p = self.predicate.ref
-
-        if not isinstance(p, IRI):
-            return None
-
-        return Triple(s.ref, p, self.object.term)
+    def to_proposition(self) -> Proposition:
+        triple = self.to_triple()
+        assert triple is not None
+        return cast(Proposition, self.subject.model.get(triple))
 
 
 class Resource:
-    model: GraphInterpretation
+    model: Model
     term: Term
 
     _description: dict[Reference, set[Resource]]  # spo index
@@ -193,7 +187,7 @@ class Resource:
     def __lt__(self, other: object) -> int:
         if isinstance(other, Resource):
             if type(self.term) == type(other.term):
-                return self.term < other.term  # type: ignore[operator]
+                return self.term < other.term
 
             return _get_order_of(self.term) < _get_order_of(other.term)
 
@@ -212,7 +206,7 @@ class Resource:
         return self.model.remove(self, pred, obj)
 
 
-class NamedResource(Resource):
+class DescribedResource(Resource):
 
     def __init__(self, model, ref: Reference):
         super().__init__(model, ref)
@@ -220,6 +214,27 @@ class NamedResource(Resource):
     @property
     def ref(self) -> Reference:
         return cast(Reference, self.term)
+
+    def as_list(self) -> Sequence | None:
+        items = []
+        for first in self.get_objects(RDF_FIRST):
+            items.append(first)
+            for rest in self.get_objects(RDF_REST):
+                if rest.term == RDF_NIL:
+                    return items
+                if not isinstance(rest, DescribedResource):
+                    return None
+                rlist = rest.as_list()
+                if rlist is None:
+                    return None
+                items += rlist
+                return items
+                break
+            else:
+                return None
+            break
+        else:
+            return None
 
     def _new_statement(self, p: IdentifiedResource, o: Resource) -> Statement:
         return Statement(self, p, o)
@@ -238,10 +253,24 @@ class NamedResource(Resource):
                     yield self._new_statement(prop, obj)
 
 
-class IdentifiedResource(NamedResource):
+class BlankResource(DescribedResource):
 
-    def __init__(self, model: GraphInterpretation, name: IRI):
-        super().__init__(model, name)
+    def __init__(self, model: Model, bnode: BNode):
+        super().__init__(model, bnode)
+
+    @property
+    def bnode(self) -> BNode:
+        return cast(BNode, self.term)
+
+
+class IdentifiedResource(DescribedResource):
+
+    # _predicate_of_objects: dict[Term, Resource]  # pos index
+    # _predicate_of_subjects: dict[Term, DescribedResource]  # pso index
+    # def predicate_of_statements(s=None, o=None) -> Statement: ...
+
+    def __init__(self, model: Model, iri: IRI):
+        super().__init__(model, iri)
 
     @property
     def iri(self) -> IRI:
@@ -250,32 +279,36 @@ class IdentifiedResource(NamedResource):
 
 class Proposition(Resource):
 
-    term: TripleTerm
-
-    def __init__(self, model: GraphInterpretation, term: TripleTerm):
+    def __init__(self, model: Model, term: Triple):
         super().__init__(model, term)
 
     @property
-    def subject(self) -> NamedResource:
-        return cast(NamedResource, self.model.get(self.term.s))
+    def triple(self) -> Triple:
+        return cast(Triple, self.term)
+
+    @property
+    def subject(self) -> DescribedResource:
+        return cast(DescribedResource, self.model.get(self.triple.s))
 
     @property
     def predicate(self) -> IdentifiedResource:
-        return cast(IdentifiedResource, self.model.get(self.term.p))
+        return cast(IdentifiedResource, self.model.get(self.triple.p))
 
     @property
     def object(self) -> Resource:
-        return self.model.get(self.term.o)
+        return self.model.get(self.triple.o)
 
 
 class Value(Resource):
 
     term: Literal
 
+    def __str__(self) -> str:
+        return self.lexical_form
 
-class DataValue(Value):
-
-    term: DataLiteral
+    @property
+    def lexical_form(self) -> str:
+        return self.term.string
 
     @property
     def type(self) -> IdentifiedResource:
@@ -283,12 +316,30 @@ class DataValue(Value):
         return cast(IdentifiedResource, datatype)
 
 
+class DataValue[D: object](Value):
+
+    data: D | None
+
+    def __init__(
+        self, model: Model, literal: Literal, data: D | None
+    ):
+        super().__init__(model, literal)
+        self.data = data
+
+
 class TextValue(Value):
 
-    term: TextLiteral
-
-    def __init__(self, model: GraphInterpretation, literal: TextLiteral):
+    def __init__(self, model: Model, literal: Literal):
+        assert literal.language is not None
         super().__init__(model, literal)
+
+    @property
+    def language(self) -> str:
+        return cast(str, self.term.language)
+
+    @property
+    def direction(self) -> str | None:
+        return self.term.direction
 
 
 def _get_order_of(term: Term):
@@ -297,9 +348,7 @@ def _get_order_of(term: Term):
             return 1
         case BNode(_):
             return 2
-        case DataLiteral(_):
+        case Literal(_):
             return 3
-        case TextLiteral(_):
+        case Triple(_):
             return 4
-        case TripleTerm(_):
-            return 5
