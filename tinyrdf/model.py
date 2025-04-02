@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence, Set
-from typing import Iterable, Iterator, Mapping, NamedTuple, cast
+from typing import Final, Iterable, Iterator, Mapping, NamedTuple, cast
 
-from .terms import (IRI, RDF_REIFIES, RDF_FIRST, RDF_NIL, RDF_REST, RDF_TYPE,
+from .terms import (IRI, RDF_FIRST, RDF_NIL, RDF_REIFIES, RDF_REST, RDF_TYPE,
                     BNode, Dataset, Graph, Literal, Quad, Reference, Term,
                     Triple)
 
@@ -37,18 +37,18 @@ class ModelSpace:
         for datum in datastream:
             if isinstance(datum, Triple):
                 s, p, o = datum
-                graph = self.default
+                model = self.default
             else:
                 s, p, o, g = datum
                 if g not in self.named:
                     assert isinstance(self.named, dict)
                     self.named[g] = self._new_model()
-                graph = self.named[g]
+                model = self.named[g]
 
-            subj = graph.get(s)
-            obj = graph.get(o)
+            subj = model.get(s)
+            obj = model.get_object(o)
 
-            if graph.add(subj, p, obj):
+            if model.add(subj, p, obj):
                 i += 1
 
         return i
@@ -77,7 +77,10 @@ class Model:
     def _new_space(self) -> ModelSpace:
         return ModelSpace(self)
 
-    def get(self, term: Term) -> Resource:
+    def get(self, ref: Reference) -> DescribedResource:
+        return cast(DescribedResource, self.get_object(ref))
+
+    def get_object(self, term: Term) -> Resource:
         resource = self._resources.get(term)
         if resource is None:
             resource = self._new_resource(term)
@@ -100,27 +103,30 @@ class Model:
             case BNode(_):
                 return BlankResource(self, term)
 
-    def add(self, subj: Resource, pred: Reference, obj: Resource) -> bool:
+    def add(self, subj: DescribedResource, pred: IRI, obj: Resource) -> bool:
         if pred not in subj._description:
             subj._description[pred] = set()
 
-        objects = subj._description[pred]
+        propositions = subj._description[pred]
 
-        if obj in objects:
+        if obj in propositions:
             return False
+
+        proposition = cast(
+            Proposition, self.get_object(Triple(subj.term, pred, obj.term))
+        )
+        propositions.add(proposition)
+
+        if pred not in obj._object_of:
+            reverse_subjects = obj._object_of[pred] = set()
         else:
-            objects.add(obj)
+            reverse_subjects = obj._object_of[pred]
 
-            if pred not in obj._object_of:
-                reverse_subjects = obj._object_of[pred] = set()
-            else:
-                reverse_subjects = obj._object_of[pred]
+        reverse_subjects.add(proposition)
 
-            reverse_subjects.add(subj)
+        return True
 
-            return True
-
-    def remove(self, subj: Resource, pred: Reference, obj: Resource | None) -> bool:
+    def remove(self, subj: DescribedResource, pred: IRI, obj: Resource | None) -> bool:
         if pred not in subj._description:
             return False
 
@@ -128,9 +134,19 @@ class Model:
             del subj._description[pred]
             return True
 
-        objects = subj._description[pred]
-        if obj in objects:
-            objects.remove(obj)
+        proposition = cast(
+            Proposition, self.get_object(Triple(subj.term, pred, obj.term))
+        )
+        propositions = subj._description[pred]
+        if proposition in propositions:
+            propositions.remove(proposition)
+
+            subjs = obj._object_of.get(pred)
+            if subjs is not None:
+                subjs.remove(proposition)
+                if len(subjs) == 0:
+                    del obj._object_of
+
             return True
         else:
             return False
@@ -138,47 +154,35 @@ class Model:
     def get_resources(self) -> Iterator[Resource]:
         return iter(self._resources.values())
 
-    def get_statements(self) -> Iterator[Statement]:
+    def get_subjects(self) -> Iterator[DescribedResource]:
         for resource in self.get_resources():
             if isinstance(resource, DescribedResource):
-                yield from resource.get_statements()
+                yield resource
+
+    def get_facts(self) -> Iterator[Proposition]:
+        for resource in self.get_subjects():
+            yield from resource.get_facts()
 
     def get_triples(self) -> Iterator[Triple]:
         for resource in self._resources.values():
             if not isinstance(resource, DescribedResource):
                 continue
-            for pred, objs in resource._description.items():
+            for pred, propositions in resource._description.items():
                 if not isinstance(pred, IRI):
                     continue
-                for obj in objs:
-                    yield Triple(resource.ref, pred, obj.term)
-
-
-class Statement(NamedTuple):
-    subject: DescribedResource
-    predicate: IdentifiedResource
-    object: Resource
-
-    def to_triple(self) -> Triple | None:
-        return Triple(self.subject.ref, self.predicate.iri, self.object.term)
-
-    def to_proposition(self) -> Proposition:
-        triple = self.to_triple()
-        assert triple is not None
-        return cast(Proposition, self.subject.model.get(triple))
+                for proposition in propositions:
+                    yield proposition.term
 
 
 class Resource:
     model: Model
     term: Term
 
-    _description: dict[Reference, set[Resource]]  # spo index
-    _object_of: dict[Reference, set[Resource]]  # ops index
+    _object_of: dict[IRI, set[Proposition]]  # ops index
 
     def __init__(self, model, term: Term):
         self.model = model
         self.term = term
-        self._description = dict()
         self._object_of = dict()
 
     def __hash__(self):
@@ -193,27 +197,40 @@ class Resource:
 
         raise TypeError(f"'<' is not supported for instances of {type(other)!r}")
 
-    def get_objects(self, predicate: Reference) -> Set[Resource]:
-        return self._description.get(predicate) or set()
+    def get_subjects(self, predicate: IRI) -> Iterator[Resource]:
+        if predicate not in self._object_of:
+            return
+        for proposition in self._object_of[predicate]:
+            yield proposition.subject
 
-    def get_subjects(self, predicate: Reference) -> Set[Resource]:
-        return self._object_of.get(predicate) or set()
+
+class DescribedResource(Resource):
+    term: Reference
+
+    _description: dict[IRI, set[Proposition]]  # spo index
+
+    def __init__(self, model: Model, term: Reference):
+        super().__init__(model, term)
+        self._description = dict()
+
+    def get_objects(self, predicate: IRI) -> Iterator[Resource]:
+        for proposition in self.get_facts(predicate):
+            yield proposition.object
+
+    def get_facts(self, predicate: IRI | None = None) -> Iterator[Proposition]:
+        if predicate is None:
+            for pred, propositions in self._description.items():
+                prop = self.model.get(pred)
+                if isinstance(prop, IdentifiedResource):
+                    yield from propositions
+        elif predicate in self._description:
+            yield from self._description[predicate]
 
     def add(self, pred: IRI, obj: Resource) -> bool:
         return self.model.add(self, pred, obj)
 
     def remove(self, pred: IRI, obj: Resource | None = None) -> bool:
         return self.model.remove(self, pred, obj)
-
-
-class DescribedResource(Resource):
-
-    def __init__(self, model, ref: Reference):
-        super().__init__(model, ref)
-
-    @property
-    def ref(self) -> Reference:
-        return cast(Reference, self.term)
 
     def as_list(self) -> Sequence | None:
         items = []
@@ -236,78 +253,41 @@ class DescribedResource(Resource):
         else:
             return None
 
-    def _new_statement(self, p: IdentifiedResource, o: Resource) -> Statement:
-        return Statement(self, p, o)
-
-    def get_statements(self, predicate: Reference | None = None) -> Iterator[Statement]:
-        if predicate is None:
-            for pred, objects in self._description.items():
-                prop = self.model.get(pred)
-                if isinstance(prop, IdentifiedResource):
-                    for obj in objects:
-                        yield self._new_statement(prop, obj)
-        else:
-            prop = self.model.get(predicate)
-            if isinstance(prop, IdentifiedResource):
-                for obj in self._description[predicate]:
-                    yield self._new_statement(prop, obj)
-
 
 class BlankResource(DescribedResource):
-
-    def __init__(self, model: Model, bnode: BNode):
-        super().__init__(model, bnode)
-
-    @property
-    def bnode(self) -> BNode:
-        return cast(BNode, self.term)
+    term: BNode
 
 
 class IdentifiedResource(DescribedResource):
+    term: IRI
 
-    # _predicate_of_objects: dict[Term, Resource]  # pos index
-    # _predicate_of_subjects: dict[Term, DescribedResource]  # pso index
-    # def predicate_of_statements(s=None, o=None) -> Statement: ...
+    _in_propositions_by_subject: dict[DescribedResource, Proposition]  # pso index
+    _in_propositions_by_object: dict[Resource, Proposition]  # pos index
+    # def predicate_of(s=None, o=None) -> Propositions: ...
 
-    def __init__(self, model: Model, iri: IRI):
-        super().__init__(model, iri)
-
-    @property
-    def iri(self) -> IRI:
-        return cast(IRI, self.term)
+    def __init__(self, model: Model, term: IRI):
+        super().__init__(model, term)
+        self._in_propositions_by_subject = {}
+        self._in_propositions_by_object = {}
 
 
 class Proposition(Resource):
+    term: Triple
+    subject: Final[DescribedResource]
+    predicate: Final[IdentifiedResource]
+    object: Final[Resource]
 
     def __init__(self, model: Model, term: Triple):
         super().__init__(model, term)
-
-    @property
-    def triple(self) -> Triple:
-        return cast(Triple, self.term)
-
-    @property
-    def subject(self) -> DescribedResource:
-        return cast(DescribedResource, self.model.get(self.triple.s))
-
-    @property
-    def predicate(self) -> IdentifiedResource:
-        return cast(IdentifiedResource, self.model.get(self.triple.p))
-
-    @property
-    def object(self) -> Resource:
-        return self.model.get(self.triple.o)
+        self.subject = self.model.get(self.term.s)
+        self.predicate = cast(IdentifiedResource, self.model.get(self.term.p))
+        self.object = self.model.get_object(self.term.o)
 
 
 class Value(Resource):
-
     term: Literal
 
     def __str__(self) -> str:
-        return self.lexical_form
-
-    @property
-    def lexical_form(self) -> str:
         return self.term.string
 
     @property
@@ -317,12 +297,9 @@ class Value(Resource):
 
 
 class DataValue[D: object](Value):
-
     data: D | None
 
-    def __init__(
-        self, model: Model, literal: Literal, data: D | None
-    ):
+    def __init__(self, model: Model, literal: Literal, data: D | None):
         super().__init__(model, literal)
         self.data = data
 
