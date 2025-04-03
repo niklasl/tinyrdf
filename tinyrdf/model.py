@@ -145,7 +145,7 @@ class Model:
             if subjs is not None:
                 subjs.remove(proposition)
                 if len(subjs) == 0:
-                    del obj._object_of
+                    del obj._object_of[pred]
 
             return True
         else:
@@ -201,7 +201,7 @@ class Resource:
         if predicate not in self._object_of:
             return
         for proposition in self._object_of[predicate]:
-            yield proposition.subject
+            yield proposition._subject
 
 
 class DescribedResource(Resource):
@@ -215,7 +215,7 @@ class DescribedResource(Resource):
 
     def get_objects(self, predicate: IRI) -> Iterator[Resource]:
         for proposition in self.get_facts(predicate):
-            yield proposition.object
+            yield proposition._object
 
     def get_facts(self, predicate: IRI | None = None) -> Iterator[Proposition]:
         if predicate is None:
@@ -273,15 +273,28 @@ class IdentifiedResource(DescribedResource):
 
 class Proposition(Resource):
     term: Triple
-    subject: Final[DescribedResource]
-    predicate: Final[IdentifiedResource]
-    object: Final[Resource]
+
+    _subject: Final[DescribedResource]
+    _predicate: Final[IdentifiedResource]
+    _object: Final[Resource]
 
     def __init__(self, model: Model, term: Triple):
         super().__init__(model, term)
-        self.subject = self.model.get(self.term.s)
-        self.predicate = cast(IdentifiedResource, self.model.get(self.term.p))
-        self.object = self.model.get_object(self.term.o)
+        self._subject = self.model.get(self.term.s)
+        self._predicate = cast(IdentifiedResource, self.model.get(self.term.p))
+        self._object = self.model.get_object(self.term.o)
+
+    @property
+    def subject(self) -> DescribedResource:
+        return self._subject
+
+    @property
+    def predicate(self) -> IdentifiedResource:
+        return self._predicate
+
+    @property
+    def object(self) -> Resource:
+        return self._object
 
 
 class Value(Resource):
