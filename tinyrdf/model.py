@@ -91,9 +91,9 @@ class Model:
                     data = None  # TODO: values.parse(term)
                     return DataValue[object](self, term, data)
             case IRI(_):
-                return IdentifiedResource(self, term)
+                return Identified(self, term)
             case BNode(_):
-                return BlankResource(self, term)
+                return Blank(self, term)
 
     def get(self, term: Term) -> Resource:
         resource = self._resources.get(term)
@@ -103,16 +103,16 @@ class Model:
 
         return resource
 
-    def about(self, ref: Reference) -> DescribedResource:
-        return cast(DescribedResource, self.get(ref))
+    def about(self, ref: Reference) -> Described:
+        return cast(Described, self.get(ref))
 
-    def new_blank(self) -> BlankResource:
-        return cast(BlankResource, self.get(self.space.new_bnode()))
+    def new_blank(self) -> Blank:
+        return cast(Blank, self.get(self.space.new_bnode()))
 
     def _get_proposition(self, s: Reference, p: IRI, o: Term):
         return cast(Proposition, self.get(Triple(s, p, o)))
 
-    def add(self, subj: DescribedResource, pred: IRI, obj: Resource) -> bool:
+    def add(self, subj: Described, pred: IRI, obj: Resource) -> bool:
         if pred not in subj._description:
             subj._description[pred] = set()
 
@@ -124,7 +124,7 @@ class Model:
 
         propositions.add(proposition)
 
-        prop = cast(IdentifiedResource, self.about(pred))
+        prop = cast(Identified, self.about(pred))
         prop._predicate_of.add(proposition)
 
         if pred not in obj._object_of:
@@ -136,7 +136,7 @@ class Model:
 
         return True
 
-    def remove(self, subj: DescribedResource, pred: IRI, obj: Resource) -> bool:
+    def remove(self, subj: Described, pred: IRI, obj: Resource) -> bool:
         if pred not in subj._description:
             return False
 
@@ -159,7 +159,7 @@ class Model:
         #if forget and len(subj._description) == 0:
         #    del self._resources[subj.term]
 
-        prop = cast(IdentifiedResource, self.about(pred))
+        prop = cast(Identified, self.about(pred))
         prop._predicate_of.remove(proposition)
 
         #if forget and len(prop._predicate_of) == 0:
@@ -178,15 +178,15 @@ class Model:
     def get_resources(self) -> Iterator[Resource]:
         return iter(self._resources.values())
 
-    def get_subjects(self) -> Iterator[DescribedResource]:
+    def get_subjects(self) -> Iterator[Described]:
         for resource in self.get_resources():
-            if isinstance(resource, DescribedResource):
+            if isinstance(resource, Described):
                 if len(resource._description):
                     yield resource
 
-    def get_predicates(self) -> Iterator[IdentifiedResource]:
+    def get_predicates(self) -> Iterator[Identified]:
         for resource in self.get_resources():
-            if isinstance(resource, IdentifiedResource):
+            if isinstance(resource, Identified):
                 if len(resource._predicate_of):
                     yield resource
 
@@ -239,7 +239,7 @@ class Resource:
         )
 
 
-class DescribedResource(Resource):
+class Described(Resource):
     term: Reference
 
     _description: dict[IRI, set[Proposition]]  # spo index
@@ -276,7 +276,7 @@ class DescribedResource(Resource):
         cons = self.model.new_blank()
         self.add(pred, cons)
 
-        prev_cons: DescribedResource | None = None
+        prev_cons: Described | None = None
         for item in items:
             if prev_cons:
                 cons = self.model.new_blank()
@@ -288,7 +288,7 @@ class DescribedResource(Resource):
             prev_cons.add(RDF_REST, self.model.about(RDF_NIL))
 
 
-class BlankResource(DescribedResource):
+class Blank(Described):
     term: BNode
 
     def as_list(self) -> Sequence | None:
@@ -298,7 +298,7 @@ class BlankResource(DescribedResource):
             for rest in self.get_objects(RDF_REST):
                 if rest.term == RDF_NIL:
                     return items
-                if not isinstance(rest, BlankResource):
+                if not isinstance(rest, Blank):
                     return None
                 rlist = rest.as_list()
                 if rlist is None:
@@ -313,7 +313,7 @@ class BlankResource(DescribedResource):
             return None
 
 
-class IdentifiedResource(DescribedResource):
+class Identified(Described):
     term: IRI
 
     _predicate_of: set[Proposition]  # p index
@@ -330,22 +330,22 @@ class IdentifiedResource(DescribedResource):
 class Proposition(Resource):
     term: Triple
 
-    _subject: Final[DescribedResource]
-    _predicate: Final[IdentifiedResource]
+    _subject: Final[Described]
+    _predicate: Final[Identified]
     _object: Final[Resource]
 
     def __init__(self, model: Model, term: Triple):
         super().__init__(model, term)
         self._subject = self.model.about(self.term.s)
-        self._predicate = cast(IdentifiedResource, self.model.get(self.term.p))
+        self._predicate = cast(Identified, self.model.get(self.term.p))
         self._object = self.model.get(self.term.o)
 
     @property
-    def subject(self) -> DescribedResource:
+    def subject(self) -> Described:
         return self._subject
 
     @property
-    def predicate(self) -> IdentifiedResource:
+    def predicate(self) -> Identified:
         return self._predicate
 
     @property
@@ -363,9 +363,9 @@ class Value(Resource):
         return self.term.string
 
     @property
-    def type(self) -> IdentifiedResource:
+    def type(self) -> Identified:
         datatype = self.model.about(self.term.datatype)
-        return cast(IdentifiedResource, datatype)
+        return cast(Identified, datatype)
 
 
 class DataValue[D: object](Value):
