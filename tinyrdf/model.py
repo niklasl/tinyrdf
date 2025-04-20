@@ -232,6 +232,21 @@ class DescribedResource(Resource):
     def remove(self, pred: IRI, obj: Resource | None = None) -> bool:
         return self.model.remove(self, pred, obj)
 
+    def add_list(self, pred: IRI, items: Sequence[Resource]) -> None:
+        cons = self.model.new_blank_resource()
+        self.add(pred, cons)
+
+        prev_cons: DescribedResource | None = None
+        for item in items:
+            if prev_cons:
+                cons = self.model.new_blank_resource()
+                prev_cons.add(RDF_REST, cons)
+            cons.add(RDF_FIRST, item)
+            prev_cons = cons
+
+        if prev_cons is not None:
+            prev_cons.add(RDF_REST, self.model.get(RDF_NIL))
+
     def as_list(self) -> Sequence | None:
         items = []
         for first in self.get_objects(RDF_FIRST):
