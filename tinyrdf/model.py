@@ -12,14 +12,16 @@ class ModelSpace:
     default: Model
     named: Mapping[Reference, Model]
 
-    _bnode_uniq: str
+    _bnode_prefix: str
     _bnode_counter: int = 0
 
-    def __init__(self, default: Model | None = None):
+    def __init__(self, default: Model | None = None, bnode_prefix: str | None = None):
         self.default = default if default is not None else self._new_model()
         self.named = {}
 
-        self._bnode_uniq = hex(id(self))[2:]
+        self._bnode_prefix = (
+            f"b-{hex(id(self))[2:]}-" if bnode_prefix is None else bnode_prefix
+        )
         self._bnode_counter = 0
 
     def _new_model(self) -> Model:
@@ -27,9 +29,9 @@ class ModelSpace:
 
     def _new_bnode_id(self) -> str:
         self._bnode_counter += 1
-        return f"b-{self._bnode_uniq}-{self._bnode_counter}"
+        return f"{self._bnode_prefix}{self._bnode_counter}"
 
-    def new_blank(self, bnode_id: str | None = None) -> BNode:
+    def new_bnode(self, bnode_id: str | None = None) -> BNode:
         return BNode(bnode_id or self._new_bnode_id())
 
     def decode(self, datastream: Iterable[Triple | Quad]) -> int:
