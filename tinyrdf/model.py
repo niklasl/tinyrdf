@@ -82,18 +82,14 @@ class Model:
 
     def _new_resource(self, term: Term) -> Resource:
         match term:
-            case Triple(_):
-                return Proposition(self, cast(Triple, term))
-            case Literal(_):
-                if term.language is not None:
-                    return TextValue(self, term)
-                else:
-                    data = None  # TODO: values.parse(term)
-                    return DataValue[object](self, term, data)
             case IRI(_):
                 return Identified(self, term)
             case BNode(_):
                 return Blank(self, term)
+            case Literal(_):
+                return Value(self, term)
+            case Triple(_):
+                return Proposition(self, cast(Triple, term))
 
     def get(self, term: Term) -> Resource:
         resource = self._resources.get(term)
@@ -359,32 +355,20 @@ class Proposition(Resource):
 class Value(Resource):
     term: Literal
 
+    def __init__(self, model: Model, literal: Literal):
+        super().__init__(model, literal)
+
     def __str__(self) -> str:
         return self.term.string
 
     @property
-    def type(self) -> Identified:
+    def datatype(self) -> Identified:
         datatype = self.model.about(self.term.datatype)
         return cast(Identified, datatype)
 
-
-class DataValue[D: object](Value):
-    data: D | None
-
-    def __init__(self, model: Model, literal: Literal, data: D | None):
-        super().__init__(model, literal)
-        self.data = data
-
-
-class TextValue(Value):
-
-    def __init__(self, model: Model, literal: Literal):
-        assert literal.language is not None
-        super().__init__(model, literal)
-
     @property
-    def language(self) -> str:
-        return cast(str, self.term.language)
+    def language(self) -> str | None:
+        return self.term.language
 
     @property
     def direction(self) -> str | None:
