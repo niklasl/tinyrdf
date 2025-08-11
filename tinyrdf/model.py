@@ -244,6 +244,10 @@ class Described(Resource):
         super().__init__(model, term)
         self._description = dict()
 
+    def get_predicates(self) -> Iterator[Identified]:
+        for pred in self._description:
+            yield cast(Identified, self.model.get(pred))
+
     def get_objects(self, predicate: IRI) -> Iterator[Resource]:
         for proposition in self.get_facts(predicate):
             yield proposition._object
