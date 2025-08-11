@@ -221,7 +221,7 @@ class Resource:
             f"'<' not supported between instances of {type(self)!r} and {type(other)!r}"
         )
 
-    def get_subjects(self, predicate: IRI) -> Iterator[Resource]:
+    def get_subjects(self, predicate: IRI) -> Iterator[Described]:
         if predicate not in self._object_of:
             return
         for proposition in self._object_of[predicate]:
