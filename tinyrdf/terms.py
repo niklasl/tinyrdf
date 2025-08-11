@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from collections.abc import Set
-from typing import NamedTuple, Literal as Exactly
+from typing import Literal as Exactly
+from typing import NamedTuple
 
 type Term = Basic | Triple  # RDF12
 type Basic = Reference | Literal
@@ -24,6 +27,19 @@ class Literal(NamedTuple):
     language: str | None = None
     direction: Direction | None = None
 
+    @classmethod
+    def from_text(
+        cls,
+        string: str,
+        language: str | None = None,
+        direction: Direction | None = None,
+    ) -> Literal:
+        if language is None:
+            return cls(string, XSD_STRING)
+
+        datatype = RDF_DIRLANGSTRING if direction else RDF_LANGSTRING
+        return cls(string, datatype, language, direction)
+
 
 class Triple(NamedTuple):
     s: Reference
@@ -39,8 +55,7 @@ class Quad(NamedTuple):
 
 
 type Graph = Set[Triple]
-type Datum = Triple | Quad
-type Dataset = Set[Datum]
+type Dataset = Set[Triple | Quad]
 
 
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -54,17 +69,3 @@ RDF_DIRLANGSTRING = IRI(f"{RDF}dirLangString")  # RDF12
 
 XSD = "http://www.w3.org/2001/XMLSchema#"
 XSD_STRING = IRI(f"{XSD}string")
-
-
-def dataliteral(string: str, datatype: IRI = XSD_STRING) -> Literal:
-    return Literal(string, datatype)
-
-
-def textliteral(
-    string: str, language: str | None = None, direction: Direction | None = None
-) -> Literal:
-    if language is None:
-        return dataliteral(string)
-
-    datatype = RDF_DIRLANGSTRING if direction else RDF_LANGSTRING
-    return Literal(string, datatype, language, direction)

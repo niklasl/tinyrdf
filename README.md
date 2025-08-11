@@ -6,39 +6,39 @@ A tiny RDF library. Implements RDF 1.2.
 
 Graph terms:
 ```python
->>> from tinyrdf.terms import BNode, Graph, IRI, Literal, Triple, XSD, dataliteral, textliteral
+>>> from tinyrdf.terms import BNode, Graph, IRI, Literal, Triple, XSD
 
 >>> IRI('s1')
 IRI(string='s1')
 
->>> dataliteral("a")
+>>> Literal.from_text("a")
 Literal(string='a', datatype=IRI(string='http://www.w3.org/2001/XMLSchema#string'), language=None, direction=None)
 
->>> dataliteral("1", datatype=IRI(f'{XSD}integer'))
+>>> Literal("1", datatype=IRI(f'{XSD}integer'))
 Literal(string='1', datatype=IRI(string='http://www.w3.org/2001/XMLSchema#integer'), language=None, direction=None)
 
->>> tl = textliteral("a", language="en")
+>>> tl = Literal.from_text("a", language="en")
 >>> tl
 Literal(string='a', datatype=IRI(string='http://www.w3.org/1999/02/22-rdf-syntax-ns#langString'), language='en', direction=None)
 
 
->>> tld = textliteral("b", language="en", direction="rtl")
+>>> tld = Literal.from_text("b", language="en", direction="rtl")
 >>> tld
 Literal(string='b', datatype=IRI(string='http://www.w3.org/1999/02/22-rdf-syntax-ns#dirLangString'), language='en', direction='rtl')
 
->>> Triple(IRI("s1"), IRI("p1"), dataliteral("a"))
+>>> Triple(IRI("s1"), IRI("p1"), Literal.from_text("a"))
 Triple(s=IRI(string='s1'), p=IRI(string='p1'), o=Literal(string='a', datatype=IRI(string='http://www.w3.org/2001/XMLSchema#string'), language=None, direction=None))
 >>>
 ```
 Graphs are sets of triples:
 ```python
 >>> g1 = set[Triple]()
->>> g1.add(Triple(IRI("s1"), IRI("p1"), dataliteral("1")))
->>> g1.add(Triple(IRI("s1"), IRI("p1"), dataliteral("2", datatype=IRI(f'{XSD}integer'))))
+>>> g1.add(Triple(IRI("s1"), IRI("p1"), Literal.from_text("1")))
+>>> g1.add(Triple(IRI("s1"), IRI("p1"), Literal("2", datatype=IRI(f'{XSD}integer'))))
 
 >>> g2 = set[Triple]()
->>> g2.add(Triple(IRI("s1"), IRI("p2"), dataliteral("a")))
->>> g2.add(Triple(IRI("s2"), IRI("p1"), textliteral("b", language="en")))
+>>> g2.add(Triple(IRI("s1"), IRI("p2"), Literal.from_text("a")))
+>>> g2.add(Triple(IRI("s2"), IRI("p1"), Literal.from_text("b", language="en")))
 
 >>> g = g1 | g2
 >>> for triple in sorted(g): print(triple)
@@ -72,7 +72,7 @@ a
 >>> for o in entity.get_objects(IRI("p3")):
 ...     print(o.term)
 
->>> for s in model.get(dataliteral("a")).get_subjects(IRI("p2")):
+>>> for s in model.get(Literal.from_text("a")).get_subjects(IRI("p2")):
 ...     print(s.term)
 IRI(string='s1')
 >>>
@@ -82,10 +82,10 @@ Order of resources:
 ```python
 >>> model = Model()
 >>> for r in sorted(model.get(x) for x in [
-...     dataliteral('a'),
+...     Literal.from_text('a'),
 ...     BNode('a'),
 ...     IRI('urn:x-a'),
-...     textliteral('a', 'en'),
+...     Literal.from_text('a', 'en'),
 ...     Triple(IRI('a'), IRI('a'), IRI('a'))
 ... ]):
 ...     print(r.term)
