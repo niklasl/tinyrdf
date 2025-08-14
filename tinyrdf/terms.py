@@ -5,8 +5,8 @@ from typing import Literal as Exactly
 from typing import NamedTuple
 
 type Term = Basic | Triple  # RDF12
-type Basic = Reference | Literal
-type Reference = IRI | BNode
+type Basic = Subject | Literal
+type Subject = IRI | BNode
 
 Direction = Exactly['ltr'] | Exactly['rtl']  # RDF12
 LTR: Direction = 'ltr'
@@ -42,16 +42,16 @@ class Literal(NamedTuple):
 
 
 class Triple(NamedTuple):
-    s: Reference
+    s: Subject
     p: IRI
     o: Term
 
 
 class Quad(NamedTuple):
-    s: Reference
+    s: Subject
     p: IRI
     o: Term
-    g: Reference
+    g: Subject
 
 
 type Graph = Set[Triple]

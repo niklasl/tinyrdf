@@ -4,13 +4,12 @@ from collections.abc import Sequence, Set
 from typing import Final, Iterable, Iterator, Mapping, NamedTuple, cast
 
 from .terms import (IRI, RDF_FIRST, RDF_NIL, RDF_REIFIES, RDF_REST, RDF_TYPE,
-                    BNode, Dataset, Graph, Literal, Quad, Reference, Term,
-                    Triple)
+                    BNode, Dataset, Graph, Literal, Quad, Subject, Term, Triple)
 
 
 class ModelSpace:
     default: Model
-    named: Mapping[Reference, Model]
+    named: Mapping[Subject, Model]
 
     _bnode_prefix: str
     _bnode_counter: int = 0
@@ -99,13 +98,13 @@ class Model:
 
         return resource
 
-    def about(self, ref: Reference) -> Described:
-        return cast(Described, self.get(ref))
+    def about(self, s: Subject) -> Described:
+        return cast(Described, self.get(s))
 
     def new_blank(self) -> Blank:
         return cast(Blank, self.get(self.space.new_bnode()))
 
-    def _get_proposition(self, s: Reference, p: IRI, o: Term):
+    def _get_proposition(self, s: Subject, p: IRI, o: Term):
         return cast(Proposition, self.get(Triple(s, p, o)))
 
     def add(self, subj: Described, pred: IRI, obj: Resource) -> bool:
@@ -236,11 +235,11 @@ class Resource:
 
 
 class Described(Resource):
-    term: Reference
+    term: Subject
 
     _description: dict[IRI, set[Proposition]]  # spo index
 
-    def __init__(self, model: Model, term: Reference):
+    def __init__(self, model: Model, term: Subject):
         super().__init__(model, term)
         self._description = dict()
 
