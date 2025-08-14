@@ -82,9 +82,9 @@ class Model:
     def _new_resource(self, term: Term) -> Resource:
         match term:
             case IRI(_):
-                return Identified(self, term)
+                return Referent(self, term)
             case BNode(_):
-                return Blank(self, term)
+                return Something(self, term)
             case Literal(_):
                 return Value(self, term)
             case Triple(_):
@@ -101,8 +101,8 @@ class Model:
     def about(self, s: Subject) -> Described:
         return cast(Described, self.get(s))
 
-    def new_blank(self) -> Blank:
-        return cast(Blank, self.get(self.space.new_bnode()))
+    def something(self) -> Something:
+        return cast(Something, self.get(self.space.new_bnode()))
 
     def _get_proposition(self, s: Subject, p: IRI, o: Term):
         return cast(Proposition, self.get(Triple(s, p, o)))
@@ -119,7 +119,7 @@ class Model:
 
         propositions.add(proposition)
 
-        prop = cast(Identified, self.about(pred))
+        prop = cast(Referent, self.about(pred))
         prop._predicate_of.add(proposition)
 
         if pred not in obj._object_of:
@@ -154,7 +154,7 @@ class Model:
         #if forget and len(subj._description) == 0:
         #    del self._resources[subj.term]
 
-        prop = cast(Identified, self.about(pred))
+        prop = cast(Referent, self.about(pred))
         prop._predicate_of.remove(proposition)
 
         #if forget and len(prop._predicate_of) == 0:
@@ -179,9 +179,9 @@ class Model:
                 if len(resource._description):
                     yield resource
 
-    def get_predicates(self) -> Iterator[Identified]:
+    def get_predicates(self) -> Iterator[Referent]:
         for resource in self.get_resources():
-            if isinstance(resource, Identified):
+            if isinstance(resource, Referent):
                 if len(resource._predicate_of):
                     yield resource
 
@@ -243,9 +243,9 @@ class Described(Resource):
         super().__init__(model, term)
         self._description = dict()
 
-    def get_predicates(self) -> Iterator[Identified]:
+    def get_predicates(self) -> Iterator[Referent]:
         for pred in self._description:
-            yield cast(Identified, self.model.get(pred))
+            yield cast(Referent, self.model.get(pred))
 
     def get_objects(self, predicate: IRI) -> Iterator[Resource]:
         for proposition in self.get_facts(predicate):
@@ -272,13 +272,13 @@ class Described(Resource):
         self.model.remove(self, pred, self._deref(obj))
 
     def add_list(self, pred: IRI, items: Sequence[Resource | Term]) -> None:
-        cons = self.model.new_blank()
+        cons = self.model.something()
         self.add(pred, cons)
 
         prev_cons: Described | None = None
         for item in items:
             if prev_cons:
-                cons = self.model.new_blank()
+                cons = self.model.something()
                 prev_cons.add(RDF_REST, cons)
             cons.add(RDF_FIRST, item)
             prev_cons = cons
@@ -287,7 +287,7 @@ class Described(Resource):
             prev_cons.add(RDF_REST, self.model.about(RDF_NIL))
 
 
-class Blank(Described):
+class Something(Described):
     term: BNode
 
     def as_list(self) -> Sequence | None:
@@ -297,7 +297,7 @@ class Blank(Described):
             for rest in self.get_objects(RDF_REST):
                 if rest.term == RDF_NIL:
                     return items
-                if not isinstance(rest, Blank):
+                if not isinstance(rest, Something):
                     return None
                 rlist = rest.as_list()
                 if rlist is None:
@@ -312,7 +312,7 @@ class Blank(Described):
             return None
 
 
-class Identified(Described):
+class Referent(Described):
     term: IRI
 
     _predicate_of: set[Proposition]  # p index
@@ -330,13 +330,13 @@ class Proposition(Resource):
     term: Triple
 
     _subject: Final[Described]
-    _predicate: Final[Identified]
+    _predicate: Final[Referent]
     _object: Final[Resource]
 
     def __init__(self, model: Model, term: Triple):
         super().__init__(model, term)
         self._subject = self.model.about(self.term.s)
-        self._predicate = cast(Identified, self.model.get(self.term.p))
+        self._predicate = cast(Referent, self.model.get(self.term.p))
         self._object = self.model.get(self.term.o)
 
     @property
@@ -344,7 +344,7 @@ class Proposition(Resource):
         return self._subject
 
     @property
-    def predicate(self) -> Identified:
+    def predicate(self) -> Referent:
         return self._predicate
 
     @property
@@ -365,9 +365,9 @@ class Value(Resource):
         return self.term.string
 
     @property
-    def datatype(self) -> Identified:
+    def datatype(self) -> Referent:
         datatype = self.model.about(self.term.datatype)
-        return cast(Identified, datatype)
+        return cast(Referent, datatype)
 
     @property
     def language(self) -> str | None:
